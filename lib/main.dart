@@ -1,12 +1,15 @@
 // main.dart
-// Vibe Alarm Pro - Flutter Android starter (single-file prototype)
-// واجهة عصرية + إعدادات اهتزاز متقدمة + زر إيقاف مؤقت داخل التطبيق
+// Vibe Alarm Pro - Flutter Android prototype
+// يتضمن:
+// - المنبهات
+// - ساعة الإيقاف + العلامات
+// - مؤقت تنازلي متكرر مع جدول دورات/اهتزازات
 //
-// ملاحظات مهمة:
-// - هذه نسخة واجهات ومنطق محلي أولي.
-// - لا تحتوي بعد على جدولة أندرويد حقيقية في الخلفية.
-// - الخطوة التالية لاحقًا: ربطها مع AlarmManager / notifications / vibration plugins.
+// ملاحظة صريحة:
+// هذا الملف يقدّم التصميم والمنطق داخل التطبيق.
+// الاهتزاز الفعلي في الخلفية وعلى مستوى النظام ما زال يحتاج ربط plugins/native Android لاحقًا.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 void main() {
@@ -63,7 +66,10 @@ class VibeAlarmProApp extends StatelessWidget {
           behavior: SnackBarBehavior.floating,
         ),
       ),
-      home: const HomeScreen(),
+      home: const Directionality(
+        textDirection: TextDirection.rtl,
+        child: HomeScreen(),
+      ),
     );
   }
 }
@@ -214,6 +220,36 @@ class AppSettings {
   }
 }
 
+class StopwatchMark {
+  const StopwatchMark({
+    required this.index,
+    required this.totalElapsed,
+    required this.splitElapsed,
+    required this.markedAt,
+  });
+
+  final int index;
+  final Duration totalElapsed;
+  final Duration splitElapsed;
+  final DateTime markedAt;
+}
+
+class CountdownCycleRecord {
+  const CountdownCycleRecord({
+    required this.index,
+    required this.targetDuration,
+    required this.finishedAt,
+    required this.vibrationDurationSeconds,
+    required this.vibrationCount,
+  });
+
+  final int index;
+  final Duration targetDuration;
+  final DateTime finishedAt;
+  final int vibrationDurationSeconds;
+  final int vibrationCount;
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -270,6 +306,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pages = [
       _buildAlarmPage(),
+      const StopwatchScreen(),
+      const RepeatingCountdownScreen(),
       SettingsScreen(
         settings: settings,
         onChanged: (value) => setState(() => settings = value),
@@ -297,6 +335,16 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.alarm_outlined),
             selectedIcon: Icon(Icons.alarm),
             label: 'المنبهات',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.timer_outlined),
+            selectedIcon: Icon(Icons.timer),
+            label: 'ساعة الإيقاف',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.hourglass_bottom_outlined),
+            selectedIcon: Icon(Icons.hourglass_bottom),
+            label: 'مؤقت متكرر',
           ),
           NavigationDestination(
             icon: Icon(Icons.tune_outlined),
@@ -457,17 +505,826 @@ class _HomeScreenState extends State<HomeScreen> {
         content: Text(
           'تم تأجيل "${alarm.title}" لمدة ${alarm.snoozeMinutes} دقائق',
         ),
-        action: SnackBarAction(
-          label: 'إلغاء',
-          onPressed: () {
-            setState(() {
-              _alarms[index] = _alarms[index].copyWith(
-                isSnoozed: false,
-                clearSnoozedUntil: true,
-              );
-            });
-          },
+      ),
+    );
+  }
+}
+
+class StopwatchScreen extends StatefulWidget {
+  const StopwatchScreen({super.key});
+
+  @override
+  State<StopwatchScreen> createState() => _StopwatchScreenState();
+}
+
+class _StopwatchScreenState extends State<StopwatchScreen> {
+  final Stopwatch _stopwatch = Stopwatch();
+  final List<StopwatchMark> _marks = [];
+  Timer? _ticker;
+  DateTime _now = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!mounted) return;
+      setState(() {
+        _now = DateTime.now();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    _stopwatch.stop();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final elapsed = _stopwatch.elapsed;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _DateAndClockHeader(now: _now),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'ساعة الإيقاف',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Text(
+                      _formatDuration(elapsed),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 40,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF6C63FF),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 14,
+                          ),
+                        ),
+                        onPressed: _stopwatch.isRunning ? _pause : _start,
+                        icon: Icon(
+                          _stopwatch.isRunning ? Icons.pause : Icons.play_arrow,
+                        ),
+                        label: Text(_stopwatch.isRunning ? 'إيقاف مؤقت' : 'بدء'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _stopwatch.isRunning ? _addMark : null,
+                        icon: const Icon(Icons.flag_outlined),
+                        label: const Text('علامة'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _stopwatch.elapsedMilliseconds > 0 ||
+                                _marks.isNotEmpty
+                            ? _reset
+                            : null,
+                        icon: const Icon(Icons.restart_alt),
+                        label: const Text('تصفير'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.table_chart_outlined,
+                            color: Color(0xFF9F99FF)),
+                        SizedBox(width: 8),
+                        Text(
+                          'جدول العلامات',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const _MarksTableHeader(),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: _marks.isEmpty
+                          ? const Center(
+                              child: Text(
+                                'لا توجد علامات بعد. اضغط زر "علامة" أثناء التشغيل.',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            )
+                          : ListView.separated(
+                              itemCount: _marks.length,
+                              separatorBuilder: (_, __) => const SizedBox(height: 8),
+                              itemBuilder: (context, index) {
+                                final mark = _marks[_marks.length - 1 - index];
+                                return _MarkRow(mark: mark);
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _start() => setState(_stopwatch.start);
+  void _pause() => setState(_stopwatch.stop);
+
+  void _reset() {
+    setState(() {
+      _stopwatch
+        ..stop()
+        ..reset();
+      _marks.clear();
+    });
+  }
+
+  void _addMark() {
+    final total = _stopwatch.elapsed;
+    final previous = _marks.isEmpty ? Duration.zero : _marks.last.totalElapsed;
+    setState(() {
+      _marks.add(
+        StopwatchMark(
+          index: _marks.length + 1,
+          totalElapsed: total,
+          splitElapsed: total - previous,
+          markedAt: DateTime.now(),
         ),
+      );
+    });
+  }
+}
+
+class RepeatingCountdownScreen extends StatefulWidget {
+  const RepeatingCountdownScreen({super.key});
+
+  @override
+  State<RepeatingCountdownScreen> createState() => _RepeatingCountdownScreenState();
+}
+
+class _RepeatingCountdownScreenState extends State<RepeatingCountdownScreen> {
+  Timer? _ticker;
+  DateTime _now = DateTime.now();
+
+  int _countdownMinutes = 1;
+  int _countdownSeconds = 0;
+  int _vibrationDurationSeconds = 2;
+  int _vibrationCount = 3;
+  int _gapBetweenVibrationsSeconds = 1;
+  bool _autoRepeat = true;
+
+  Duration _remaining = const Duration(minutes: 1);
+  Duration _initialTarget = const Duration(minutes: 1);
+  bool _isRunning = false;
+  bool _isInVibrationPhase = false;
+  int _currentVibrationRound = 0;
+  DateTime? _lastTick;
+  final List<CountdownCycleRecord> _records = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _remaining = _composeTargetDuration();
+    _initialTarget = _composeTargetDuration();
+    _ticker = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!mounted) return;
+      _onTick();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final statusText = _isInVibrationPhase
+        ? 'مرحلة الاهتزاز الوهمية ${_currentVibrationRound + 1} / $_vibrationCount'
+        : _isRunning
+            ? 'العدّ يعمل الآن'
+            : 'جاهز للبدء';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _DateAndClockHeader(now: _now),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'مؤقت متكرر مع اهتزاز',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    statusText,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF171F37), Color(0xFF0F1529)],
+                        ),
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: Column(
+                        children: [
+                          const Text(
+                            'العداد الحالي',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _formatCountdown(_remaining),
+                            style: const TextStyle(
+                              fontSize: 42,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          if (_isInVibrationPhase)
+                            Text(
+                              'مدة الاهتزاز: $_vibrationDurationSeconds ث • الفاصل: $_gapBetweenVibrationsSeconds ث',
+                              style: const TextStyle(color: Color(0xFFB8B3FF)),
+                            )
+                          else
+                            Text(
+                              'الهدف: ${_formatCountdown(_initialTarget)}',
+                              style: const TextStyle(color: Color(0xFFB8B3FF)),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF6C63FF),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 14,
+                          ),
+                        ),
+                        onPressed: _isRunning ? _pauseCountdown : _startCountdown,
+                        icon: Icon(_isRunning ? Icons.pause : Icons.play_arrow),
+                        label: Text(_isRunning ? 'إيقاف مؤقت' : 'بدء'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _resetCountdown,
+                        icon: const Icon(Icons.restart_alt),
+                        label: const Text('إعادة ضبط'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 12,
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ListView(
+                        children: [
+                          const Text(
+                            'إعدادات المؤقت',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _SliderField(
+                            label: 'الدقائق',
+                            valueLabel: '$_countdownMinutes دقيقة',
+                            value: _countdownMinutes.toDouble(),
+                            min: 0,
+                            max: 120,
+                            divisions: 120,
+                            icon: Icons.schedule,
+                            onChanged: _isRunning
+                                ? (_) {}
+                                : (v) {
+                                    setState(() {
+                                      _countdownMinutes = v.round();
+                                      _updateConfiguredTarget();
+                                    });
+                                  },
+                          ),
+                          _SliderField(
+                            label: 'الثواني',
+                            valueLabel: '$_countdownSeconds ثانية',
+                            value: _countdownSeconds.toDouble(),
+                            min: 0,
+                            max: 59,
+                            divisions: 59,
+                            icon: Icons.timer,
+                            onChanged: _isRunning
+                                ? (_) {}
+                                : (v) {
+                                    setState(() {
+                                      _countdownSeconds = v.round();
+                                      _updateConfiguredTarget();
+                                    });
+                                  },
+                          ),
+                          _SliderField(
+                            label: 'مدة الاهتزاز',
+                            valueLabel: '$_vibrationDurationSeconds ثانية',
+                            value: _vibrationDurationSeconds.toDouble(),
+                            min: 1,
+                            max: 20,
+                            divisions: 19,
+                            icon: Icons.vibration,
+                            onChanged: (v) {
+                              setState(() {
+                                _vibrationDurationSeconds = v.round();
+                              });
+                            },
+                          ),
+                          _SliderField(
+                            label: 'عدد مرات الاهتزاز',
+                            valueLabel: '$_vibrationCount مرة',
+                            value: _vibrationCount.toDouble(),
+                            min: 1,
+                            max: 20,
+                            divisions: 19,
+                            icon: Icons.repeat,
+                            onChanged: (v) {
+                              setState(() {
+                                _vibrationCount = v.round();
+                              });
+                            },
+                          ),
+                          _SliderField(
+                            label: 'الفاصل بين الاهتزازات',
+                            valueLabel: '$_gapBetweenVibrationsSeconds ثانية',
+                            value: _gapBetweenVibrationsSeconds.toDouble(),
+                            min: 0,
+                            max: 10,
+                            divisions: 10,
+                            icon: Icons.space_bar,
+                            onChanged: (v) {
+                              setState(() {
+                                _gapBetweenVibrationsSeconds = v.round();
+                              });
+                            },
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'إعادة العد تلقائيًا بعد نهاية الاهتزاز',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            subtitle: const Text(
+                              'إذا كانت مفعلة يعود العداد لنفس الزمن ويبدأ دورة جديدة.',
+                            ),
+                            value: _autoRepeat,
+                            onChanged: (v) {
+                              setState(() {
+                                _autoRepeat = v;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 13,
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.table_rows_outlined,
+                                  color: Color(0xFF9F99FF)),
+                              SizedBox(width: 8),
+                              Text(
+                                'جدول الدورات',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          const _CycleTableHeader(),
+                          const SizedBox(height: 8),
+                          Expanded(
+                            child: _records.isEmpty
+                                ? const Center(
+                                    child: Text(
+                                      'عند انتهاء العد سيظهر هنا وقت النهاية وعدد الاهتزازات والزمن المحدد.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(color: Colors.white70),
+                                    ),
+                                  )
+                                : ListView.separated(
+                                    itemCount: _records.length,
+                                    separatorBuilder: (_, __) =>
+                                        const SizedBox(height: 8),
+                                    itemBuilder: (context, index) {
+                                      final record = _records[
+                                          _records.length - 1 - index];
+                                      return _CycleRow(record: record);
+                                    },
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _onTick() {
+    final now = DateTime.now();
+    final lastTick = _lastTick ?? now;
+    final delta = now.difference(lastTick);
+    _lastTick = now;
+
+    if (!_isRunning) {
+      setState(() {
+        _now = now;
+      });
+      return;
+    }
+
+    setState(() {
+      _now = now;
+
+      if (_remaining > Duration.zero) {
+        _remaining = _remaining - delta;
+        if (_remaining <= Duration.zero) {
+          _remaining = Duration.zero;
+          if (!_isInVibrationPhase) {
+            _beginVibrationPhase();
+          } else {
+            _progressVibrationPhase();
+          }
+        }
+      } else {
+        if (_isInVibrationPhase) {
+          _progressVibrationPhase();
+        }
+      }
+    });
+  }
+
+  Duration _composeTargetDuration() {
+    final totalSeconds = (_countdownMinutes * 60) + _countdownSeconds;
+    return Duration(seconds: totalSeconds <= 0 ? 1 : totalSeconds);
+  }
+
+  void _updateConfiguredTarget() {
+    _initialTarget = _composeTargetDuration();
+    if (!_isRunning) {
+      _remaining = _initialTarget;
+    }
+  }
+
+  void _startCountdown() {
+    setState(() {
+      _initialTarget = _composeTargetDuration();
+      if (_remaining <= Duration.zero) {
+        _remaining = _initialTarget;
+      }
+      _isRunning = true;
+      _lastTick = DateTime.now();
+    });
+  }
+
+  void _pauseCountdown() {
+    setState(() {
+      _isRunning = false;
+      _lastTick = null;
+    });
+  }
+
+  void _resetCountdown() {
+    setState(() {
+      _isRunning = false;
+      _isInVibrationPhase = false;
+      _currentVibrationRound = 0;
+      _lastTick = null;
+      _initialTarget = _composeTargetDuration();
+      _remaining = _initialTarget;
+      _records.clear();
+    });
+  }
+
+  void _beginVibrationPhase() {
+    _isInVibrationPhase = true;
+    _currentVibrationRound = 0;
+    _remaining = Duration(seconds: _vibrationDurationSeconds);
+    _records.add(
+      CountdownCycleRecord(
+        index: _records.length + 1,
+        targetDuration: _initialTarget,
+        finishedAt: DateTime.now(),
+        vibrationDurationSeconds: _vibrationDurationSeconds,
+        vibrationCount: _vibrationCount,
+      ),
+    );
+  }
+
+  void _progressVibrationPhase() {
+    _currentVibrationRound += 1;
+
+    if (_currentVibrationRound >= _vibrationCount) {
+      if (_autoRepeat) {
+        _isInVibrationPhase = false;
+        _currentVibrationRound = 0;
+        _initialTarget = _composeTargetDuration();
+        _remaining = _initialTarget;
+      } else {
+        _isInVibrationPhase = false;
+        _isRunning = false;
+        _currentVibrationRound = 0;
+        _remaining = Duration.zero;
+        _lastTick = null;
+      }
+      return;
+    }
+
+    final gap = _gapBetweenVibrationsSeconds;
+    _remaining = Duration(seconds: gap + _vibrationDurationSeconds);
+  }
+}
+
+class _DateAndClockHeader extends StatelessWidget {
+  const _DateAndClockHeader({required this.now});
+
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: const Color(0x226C63FF),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.schedule, color: Color(0xFF9F99FF)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${_dayNameFromDate(now)}  ${_formatDate(now)}',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _formatClock(now),
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MarksTableHeader extends StatelessWidget {
+  const _MarksTableHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF182038),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: const Row(
+        children: [
+          SizedBox(
+            width: 52,
+            child: Text(
+              'رقم',
+              style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white70),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              'من السابقة',
+              style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white70),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              'الإجمالي',
+              style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white70),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              'وقت العلامة',
+              style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white70),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MarkRow extends StatelessWidget {
+  const _MarkRow({required this.mark});
+
+  final StopwatchMark mark;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121726),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 52,
+            child: Text(
+              '.${mark.index}',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+          Expanded(child: Text(_formatDuration(mark.splitElapsed))),
+          Expanded(child: Text(_formatDuration(mark.totalElapsed))),
+          Expanded(child: Text(_formatClock(mark.markedAt))),
+        ],
+      ),
+    );
+  }
+}
+
+class _CycleTableHeader extends StatelessWidget {
+  const _CycleTableHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF182038),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: const Row(
+        children: [
+          SizedBox(
+            width: 48,
+            child: Text(
+              'رقم',
+              style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white70),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              'المدة',
+              style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white70),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              'وقت النهاية',
+              style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white70),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              'الاهتزاز',
+              style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white70),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CycleRow extends StatelessWidget {
+  const _CycleRow({required this.record});
+
+  final CountdownCycleRecord record;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121726),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 48,
+            child: Text('.${record.index}'),
+          ),
+          Expanded(child: Text(_formatCountdown(record.targetDuration))),
+          Expanded(child: Text(_formatClock(record.finishedAt))),
+          Expanded(
+            child: Text(
+              '${record.vibrationCount} × ${record.vibrationDurationSeconds}ث',
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -692,10 +1549,7 @@ class _AlarmEditorSheetState extends State<AlarmEditorSheet> {
               ),
             ),
             const SizedBox(height: 14),
-            _TimeTile(
-              time: _time,
-              onTap: _pickTime,
-            ),
+            _TimeTile(time: _time, onTap: _pickTime),
             const SizedBox(height: 18),
             const Text(
               'الأيام',
@@ -810,9 +1664,7 @@ class _AlarmEditorSheetState extends State<AlarmEditorSheet> {
                 max: 30,
                 divisions: 29,
                 icon: Icons.music_note_outlined,
-                onChanged: (v) {
-                  setState(() => _enableSoundAfterMinutes = v.round());
-                },
+                onChanged: (v) => setState(() => _enableSoundAfterMinutes = v.round()),
               ),
             const SizedBox(height: 18),
             SizedBox(
@@ -946,10 +1798,7 @@ class AlarmPreviewScreen extends StatelessWidget {
                 const SizedBox(height: 10),
                 Text(
                   alarm.mode.label,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 16,
-                  ),
+                  style: const TextStyle(color: Colors.white70, fontSize: 16),
                 ),
                 const SizedBox(height: 20),
                 Wrap(
@@ -1056,7 +1905,7 @@ class _TopHero extends StatelessWidget {
                 ),
                 SizedBox(height: 8),
                 Text(
-                  'منبه أندرويد عصري يركز على الاهتزاز أولًا، مع تحكم كامل في التأخير والتكرار والمدة والإيقاف المؤقت.',
+                  'منبه + ساعة إيقاف + مؤقت متكرر مع جدول داخلي وواجهة عربية عصرية.',
                   style: TextStyle(
                     height: 1.4,
                     color: Colors.white,
@@ -1273,7 +2122,7 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'إعدادات افتراضية لتطبيق الاهتزاز والمنبه.',
+            'إعدادات افتراضية للتطبيق.',
             style: TextStyle(color: Colors.white70),
           ),
           const SizedBox(height: 18),
@@ -1372,10 +2221,8 @@ class _NumberSettingCard extends StatelessWidget {
           children: [
             const CircleAvatar(
               backgroundColor: Color(0x226C63FF),
-              child: Icon(
-                Icons.settings_input_component,
-                color: Color(0xFF9F99FF),
-              ),
+              child: Icon(Icons.settings_input_component,
+                  color: Color(0xFF9F99FF)),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1462,10 +2309,61 @@ String _dayNameShort(int day) {
   return names[day];
 }
 
+String _dayNameFromDate(DateTime date) {
+  const names = [
+    'الاثنين',
+    'الثلاثاء',
+    'الأربعاء',
+    'الخميس',
+    'الجمعة',
+    'السبت',
+    'الأحد',
+  ];
+  return names[date.weekday - 1];
+}
+
 String _formatDateTimeShort(DateTime dateTime) {
   final hour24 = dateTime.hour;
   final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
   final minute = dateTime.minute.toString().padLeft(2, '0');
   final suffix = hour24 >= 12 ? 'م' : 'ص';
   return '$hour12:$minute $suffix';
+}
+
+String _formatClock(DateTime dateTime) {
+  final hour24 = dateTime.hour;
+  final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+  final minute = dateTime.minute.toString().padLeft(2, '0');
+  final second = dateTime.second.toString().padLeft(2, '0');
+  final suffix = hour24 >= 12 ? 'م' : 'ص';
+  return '$hour12:$minute:$second $suffix';
+}
+
+String _formatDate(DateTime dateTime) {
+  final day = dateTime.day.toString().padLeft(2, '0');
+  final month = dateTime.month.toString().padLeft(2, '0');
+  final year = (dateTime.year % 100).toString().padLeft(2, '0');
+  return '$day-$month-$year';
+}
+
+String _formatDuration(Duration duration) {
+  final hours = duration.inHours;
+  final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+  final centiseconds =
+      ((duration.inMilliseconds.remainder(1000)) ~/ 10).toString().padLeft(2, '0');
+
+  if (hours > 0) {
+    return '$hours:$minutes:$seconds.$centiseconds';
+  }
+  return '$minutes:$seconds.$centiseconds';
+}
+
+String _formatCountdown(Duration duration) {
+  final totalSeconds = duration.inSeconds;
+  final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
+  final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+  final centiseconds =
+      ((duration.inMilliseconds.remainder(1000)) ~/ 10).toString().padLeft(2, '0');
+  return '$minutes:$seconds.$centiseconds';
 }
